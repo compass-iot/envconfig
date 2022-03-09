@@ -27,6 +27,7 @@ var (
 // Options to change default parsing.
 type Options struct {
 	SplitWords bool
+	Required   bool
 }
 
 // A ParseError occurs when an environment variable cannot be converted to
@@ -221,7 +222,7 @@ func ProcessWithOptions(prefix string, spec interface{}, options Options) error 
 
 		req := info.Tags.Get("required")
 		if !ok && def == "" {
-			if isTrue(req) {
+			if isTrue(req) || (options.Required && !isFalse(req)) {
 				key := info.Key
 				if info.Alt != "" {
 					key = info.Alt

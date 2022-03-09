@@ -219,6 +219,53 @@ func TestProcess(t *testing.T) {
 	}
 }
 
+func TestProcessWithOptionsRequired(t *testing.T) {
+	var s struct {
+		Embedded       `desc:"can we document a struct"`
+		Debug          bool
+		DefaultVar     string `default:"foobar"`
+		RequiredVar    string `required:"True"`
+		NotRequiredVar string `required:"False"`
+		Ignored        string `ignored:"true"`
+	}
+
+	setBase := func() {
+		os.Clearenv()
+		os.Setenv("ENV_CONFIG_MULTI_WITH_DIFFERENT_ALT", "abc")
+		os.Setenv("EMBEDDED_WITH_ALT", "abc")
+		os.Setenv("ENV_CONFIG_MULTI_WORD_VAR_WITH_AUTO_SPLIT", "1")
+		os.Setenv("ENV_CONFIG_MULTI_WORD_ACR_WITH_AUTO_SPLIT", "1")
+		os.Setenv("ENV_CONFIG_MULTIWORDVAR", "1")
+		os.Setenv("ENV_CONFIG_REQUIREDVAR", "foo")
+	}
+
+	setBase()
+	os.Setenv("ENV_CONFIG_ENABLED", "true")
+	os.Setenv("ENV_CONFIG_EMBEDDEDPORT", "1234")
+
+	err := ProcessWithOptions("env_config", &s, Options{Required: true})
+	if err == nil {
+		t.Error("no failure when missing required variable")
+	}
+
+	setBase()
+	os.Setenv("ENV_CONFIG_DEBUG", "true")
+
+	err = ProcessWithOptions("env_config", &s, Options{Required: true})
+	if err == nil {
+		t.Error("no failure when missing required variable")
+	}
+
+	setBase()
+	os.Setenv("ENV_CONFIG_ENABLED", "true")
+	os.Setenv("ENV_CONFIG_EMBEDDEDPORT", "1234")
+	os.Setenv("ENV_CONFIG_DEBUG", "true")
+
+	if err := ProcessWithOptions("env_config", &s, Options{Required: true}); err != nil {
+		t.Error(err.Error())
+	}
+}
+
 func TestProcessWithOptions(t *testing.T) {
 	var s Specification
 
