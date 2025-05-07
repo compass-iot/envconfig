@@ -6,7 +6,7 @@
 import "github.com/kelseyhightower/envconfig"
 ```
 
-## Documentation
+## Documentation  
 
 See [godoc](http://godoc.org/github.com/kelseyhightower/envconfig)
 
