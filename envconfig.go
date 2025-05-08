@@ -27,8 +27,9 @@ var (
 
 // Options to change default parsing.
 type Options struct {
-	SplitWords bool
-	Required   bool
+	SplitWords         bool
+	Required           bool
+	ParallelExcecution bool
 }
 
 // A ParseError occurs when an environment variable cannot be converted to
@@ -204,73 +205,86 @@ func Process(prefix string, spec interface{}) error {
 // ProcessWithOptions is like Process() but with specified options.
 func ProcessWithOptions(prefix string, spec interface{}, options Options) error {
 	infos, err := gatherInfo(prefix, spec, options)
-
-	var wg sync.WaitGroup
-	errCh := make(chan error, len(infos))
-
-	for _, info := range infos {
-		wg.Add(1)
-
-		// `os.Getenv` cannot differentiate between an explicitly set empty value
-		// and an unset value. `os.LookupEnv` is preferred to `syscall.Getenv`,
-		// but it is only available in go1.5 or newer. We're using Go build tags
-		// here to use os.LookupEnv for >=go1.5
-
-		go func(info varInfo) {
-			defer wg.Done()
-			value, ok := lookupEnv(info.Key)
-			if !ok && info.Alt != "" {
-				value, ok = lookupEnv(info.Alt)
-			}
-
-			def := info.Tags.Get("default")
-			if def != "" && !ok {
-				value = def
-			}
-
-			req := info.Tags.Get("required")
-			if !ok && def == "" {
-				if isTrue(req) || (options.Required && !isFalse(req)) {
-					key := info.Key
-					if info.Alt != "" {
-						key = info.Alt
-					}
-					errCh <- fmt.Errorf("required key %s missing value", key)
-				}
-				errCh <- nil
-				return
-			}
-
-			err = processField(value, info.Field)
-			if err != nil {
-				errCh <- &ParseError{
-					KeyName:   info.Key,
-					FieldName: info.Name,
-					TypeName:  info.Field.Type().String(),
-					Value:     value,
-					Err:       err,
-				}
-				return
-			}
-			errCh <- nil
-		}(info)
-
+	if err != nil {
+		return err
 	}
 
-	wg.Wait()
-	close(errCh)
+	if options.ParallelExcecution {
+		var wg sync.WaitGroup
+		errCh := make(chan error, len(infos))
 
-	var allErrs []error
-	for e := range errCh {
-		if e != nil {
-			allErrs = append(allErrs, e)
+		for _, info := range infos {
+			wg.Add(1)
+
+			go func(info varInfo) {
+				defer wg.Done()
+				errCh <- processInfo(info, options)
+			}(info)
+		}
+
+		wg.Wait()
+		close(errCh)
+
+		var allErrs []error
+		for e := range errCh {
+			if e != nil {
+				allErrs = append(allErrs, e)
+			}
+		}
+
+		if len(allErrs) > 0 {
+			return fmt.Errorf("multiple errors: %v", allErrs)
+		}
+
+		return nil
+	} else {
+		for _, info := range infos {
+			err := processInfo(info, options)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}
+
+func processInfo(info varInfo, options Options) error {
+	// `os.Getenv` cannot differentiate between an explicitly set empty value
+	// and an unset value. `os.LookupEnv` is preferred to `syscall.Getenv`,
+	// but it is only available in go1.5 or newer. We're using Go build tags
+	// here to use os.LookupEnv for >=go1.5
+
+	value, ok := lookupEnv(info.Key)
+	if !ok && info.Alt != "" {
+		value, ok = lookupEnv(info.Alt)
+	}
+
+	def := info.Tags.Get("default")
+	if def != "" && !ok {
+		value = def
+	}
+
+	req := info.Tags.Get("required")
+	if !ok && def == "" {
+		if isTrue(req) || (options.Required && !isFalse(req)) {
+			key := info.Key
+			if info.Alt != "" {
+				key = info.Alt
+			}
+			return fmt.Errorf("required key %s missing value", key)
+		}
+		return nil
+	}
+
+	if err := processField(value, info.Field); err != nil {
+		return &ParseError{
+			KeyName:   info.Key,
+			FieldName: info.Name,
+			TypeName:  info.Field.Type().String(),
+			Value:     value,
+			Err:       err,
 		}
 	}
-
-	if len(allErrs) > 0 {
-		return fmt.Errorf("multiple errors: %v", allErrs)
-	}
-
 	return nil
 }
 
